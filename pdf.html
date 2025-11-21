@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>剪影文档工坊 | Silhouette Studio</title>
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+    <style>
+        /* --- 基础样式保持不变 --- */
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0f0f0f 0%, #1a1a2e 50%, #0f3460 100%);
+            --panel-bg: rgba(25, 25, 35, 0.95);
+            --card-bg: rgba(40, 40, 50, 0.3);
+            --settings-bg: rgba(20, 20, 25, 0.6);
+            --accent: #00d2ff;
+            --accent-hover: #33e0ff;
+            --text-main: #ececec;
+            --text-sub: #999;
+            --danger: #ff4d4f;
+            --border-color: rgba(255,255,255,0.08);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Roboto, sans-serif; background: var(--bg-gradient); min-height: 100vh; color: var(--text-main); display: flex; flex-direction: column; align-items: center; padding: 30px 20px; }
+        header { text-align: center; margin-bottom: 30px; position: relative; z-index: 10; }
+        header h1 { font-size: 2.2rem; font-weight: 300; letter-spacing: 1px; margin-bottom: 8px; text-shadow: 0 0 15px rgba(0, 210, 255, 0.4); }
+        header span { color: var(--accent); font-weight: 600; }
+        
+        .app-container { width: 100%; max-width: 800px; background: var(--panel-bg); backdrop-filter: blur(20px); border-radius: 16px; border: 1px solid var(--border-color); padding: 25px; box-shadow: 0 25px 70px rgba(0,0,0,0.6); z-index: 10; position: relative; }
+
+        /* --- 上传 & 列表 --- */
+        .upload-zone { border: 2px dashed rgba(255,255,255,0.15); border-radius: 10px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.3s; background: rgba(0,0,0,0.2); margin-bottom: 20px; }
+        .upload-zone:hover { border-color: var(--accent); background: rgba(0, 210, 255, 0.08); }
+        .upload-zone i { font-size: 28px; color: var(--text-sub); margin-bottom: 8px; }
+        #file-input { display: none; }
+
+        .file-list-container { max-height: 400px; overflow-y: auto; margin-bottom: 20px; padding-right: 5px; }
+        .file-list-container::-webkit-scrollbar { width: 6px; }
+        .file-list-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+        .file-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+
+        .list-item-wrapper { background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden; }
+        .file-card { padding: 10px 15px; display: flex; align-items: center; justify-content: space-between; cursor: grab; }
+        .file-info { display: flex; align-items: center; gap: 15px; flex: 1; overflow: hidden; }
+        .thumb-box { width: 32px; height: 32px; border-radius: 4px; background: rgba(0,0,0,0.3); display: flex; justify-content: center; align-items: center; overflow: hidden; flex-shrink: 0; }
+        .thumb-box img { width: 100%; height: 100%; object-fit: cover; }
+        .file-name { font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .card-actions button { background: transparent; border: none; color: var(--text-sub); cursor: pointer; padding: 5px 8px; border-radius: 4px; transition: 0.2s; }
+        .card-actions button:hover { color: var(--accent); background: rgba(255,255,255,0.1); }
+
+        /* 图片设置面板样式 (保留) */
+        .settings-panel { background: var(--settings-bg); padding: 10px 15px; border-top: 1px solid var(--border-color); display: none; font-size: 0.8rem; }
+        .settings-panel.show { display: block; }
+        .settings-row { display: flex; align-items: center; margin-bottom: 8px; }
+        .settings-label { width: 60px; color: var(--text-sub); }
+        input[type=range] { flex: 1; -webkit-appearance: none; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; outline: none; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: var(--accent); border-radius: 50%; cursor: pointer; }
+
+        /* 九宫格通用样式 */
+        .align-grid { display: grid; grid-template-columns: repeat(3, 20px); grid-gap: 3px; background: rgba(0,0,0,0.2); padding: 3px; border-radius: 3px; }
+        .align-btn { width: 20px; height: 20px; background: rgba(255,255,255,0.05); cursor: pointer; border-radius: 2px; position: relative; }
+        .align-btn.active { background: var(--accent); }
+        .align-btn::after { content: ''; display: block; width: 3px; height: 3px; background: rgba(255,255,255,0.3); margin: 8px auto; border-radius: 50%; }
+        .align-btn.active::after { background: #000; }
+        /* 偏移逻辑同上 */
+        .tl::after{ margin: 3px 0 0 3px; } .tc::after{ margin: 3px auto 0 auto; } .tr::after{ margin: 3px 3px 0 auto; }
+        .cl::after{ margin: auto 0 auto 3px; } .cc::after{ margin: auto; } .cr::after{ margin: auto 3px auto auto; }
+        .bl::after{ margin: auto 0 3px 3px; } .bc::after{ margin: auto auto 3px auto; } .br::after{ margin: auto 3px 3px auto; }
+
+        /* --- 签名区域样式 (New) --- */
+        .signature-section { margin-top: 10px; border-top: 1px solid var(--border-color); padding-top: 15px; }
+        .sig-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .sig-title { font-size: 0.9rem; color: var(--accent); font-weight: 600; }
+        
+        .btn-add-sig { background: rgba(0, 210, 255, 0.1); border: 1px dashed var(--accent); color: var(--accent); padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 0.85rem; transition: 0.2s; }
+        .btn-add-sig:hover { background: rgba(0, 210, 255, 0.2); }
+
+        /* 签名预览与设置 */
+        .sig-preview-box { display: none; background: var(--settings-bg); border-radius: 8px; padding: 15px; margin-top: 10px; border: 1px solid var(--border-color); }
+        .sig-preview-box.active { display: flex; gap: 20px; align-items: center; }
+        
+        .sig-img-wrap { width: 100px; height: 60px; background: #fff; border-radius: 4px; display: flex; justify-content: center; align-items: center; padding: 5px; position: relative; }
+        .sig-img-wrap img { max-width: 100%; max-height: 100%; object-fit: contain; }
+        .btn-del-sig { position: absolute; top: -5px; right: -5px; background: var(--danger); color: white; width: 18px; height: 18px; border-radius: 50%; border: none; cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 10px; }
+
+        .sig-controls { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+        .control-row { display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; color: var(--text-sub); }
+        select.scope-select { background: #111; border: 1px solid #444; color: #eee; padding: 4px; border-radius: 4px; outline: none; }
+
+        /* --- 模态框 (Modal) --- */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; backdrop-filter: blur(5px); display: none; justify-content: center; align-items: center; }
+        .modal-box { background: #fff; width: 90%; max-width: 500px; border-radius: 12px; padding: 20px; box-shadow: 0 0 50px rgba(0,0,0,0.5); position: relative; animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        
+        .modal-title { color: #333; font-size: 1.1rem; font-weight: 600; margin-bottom: 15px; text-align: center; }
+        .canvas-wrapper { border: 2px dashed #ccc; border-radius: 8px; overflow: hidden; touch-action: none; background: #f9f9f9; position: relative; cursor: crosshair; }
+        canvas { display: block; width: 100%; height: 200px; }
+        
+        .modal-actions { display: flex; gap: 10px; margin-top: 15px; }
+        .btn-modal { flex: 1; padding: 10px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+        .btn-cancel { background: #f0f0f0; color: #555; }
+        .btn-clear { background: #ffecec; color: var(--danger); }
+        .btn-save { background: var(--accent); color: #000; }
+
+        /* --- 底部按钮 --- */
+        .action-bar { margin-top: 25px; display: flex; justify-content: space-between; align-items: center; }
+        .btn-merge { background: var(--accent); color: #09090b; border: none; padding: 12px 35px; border-radius: 6px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 8px; opacity: 0.5; pointer-events: none; transition: all 0.3s; }
+        .btn-merge.active { opacity: 1; pointer-events: auto; box-shadow: 0 0 20px rgba(0, 210, 255, 0.3); }
+        
+        /* Loading */
+        .loader { border: 2px solid rgba(0,0,0,0.1); border-top: 2px solid #000; border-radius: 50%; width: 16px; height: 16px; animation: spin 0.8s linear infinite; display: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Silhouette <span>Studio</span></h1>
+        <p>PDF 合并 · 图片排版 · 电子签名</p>
+    </header>
+
+    <div class="app-container">
+        <div class="upload-zone" id="drop-area">
+            <i class="fas fa-cloud-upload-alt"></i>
+            <div style="font-size:0.9rem; color:#ccc;">点击或拖拽添加 PDF/图片</div>
+            <input type="file" id="file-input" accept="application/pdf, image/jpeg, image/png" multiple>
+        </div>
+
+        <div class="file-list-container">
+            <ul class="file-list" id="file-list"></ul>
+        </div>
+
+        <div class="signature-section">
+            <div class="sig-header">
+                <span class="sig-title"><i class="fas fa-signature"></i> 电子签名</span>
+                <button class="btn-add-sig" id="btn-open-sig">+ 创建签名</button>
+            </div>
+            
+            <div class="sig-preview-box" id="sig-config">
+                <div class="sig-img-wrap">
+                    <img id="sig-preview-img" src="" alt="Signature">
+                    <button class="btn-del-sig" onclick="removeSignature()">×</button>
+                </div>
+                <div class="sig-controls">
+                    <div class="control-row">
+                        <span>应用范围:</span>
+                        <select class="scope-select" id="sig-scope">
+                            <option value="all">每一页</option>
+                            <option value="last" selected>仅最后一页</option>
+                            <option value="first">仅第一页</option>
+                        </select>
+                    </div>
+                    <div class="control-row">
+                        <span>位置/大小:</span>
+                        <div class="align-grid" style="display:inline-grid; vertical-align:middle; margin-right:10px;">
+                            <div class="align-btn tl" onclick="setSigAlign('tl', this)"></div>
+                            <div class="align-btn tc" onclick="setSigAlign('tc', this)"></div>
+                            <div class="align-btn tr" onclick="setSigAlign('tr', this)"></div>
+                            <div class="align-btn cl" onclick="setSigAlign('cl', this)"></div>
+                            <div class="align-btn cc" onclick="setSigAlign('cc', this)"></div>
+                            <div class="align-btn cr" onclick="setSigAlign('cr', this)"></div>
+                            <div class="align-btn bl" onclick="setSigAlign('bl', this)"></div>
+                            <div class="align-btn bc" onclick="setSigAlign('bc', this)"></div>
+                            <div class="align-btn br active" onclick="setSigAlign('br', this)"></div>
+                        </div>
+                        <input type="range" min="10" max="60" value="30" id="sig-scale" style="width:60px;">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="action-bar">
+            <span style="color:#888; font-size:0.85rem" id="status-text">准备就绪</span>
+            <button class="btn-merge" id="merge-btn">
+                <div class="loader" id="loader"></div>
+                <span id="btn-text">生成 PDF</span>
+            </button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="sig-modal">
+        <div class="modal-box">
+            <div class="modal-title">请在下方签署姓名</div>
+            <div class="canvas-wrapper">
+                <canvas id="sig-canvas"></canvas>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-modal btn-cancel" onclick="closeSigModal()">取消</button>
+                <button class="btn-modal btn-clear" onclick="clearCanvas()">清除</button>
+                <button class="btn-modal btn-save" onclick="saveSignature()">确认使用</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { PDFDocument, PageSizes } = PDFLib;
+        const A4_WIDTH = 595.28;
+        const A4_HEIGHT = 841.89;
+        const MARGIN = 20;
+
+        let filesMap = new Map();
+        let signatureData = null; // 存储签名的 base64
+        let sigSettings = { align: 'br', scope: 'last' }; // br = Bottom Right
+
+        // DOM Elements
+        const dropArea = document.getElementById('drop-area');
+        const fileInput = document.getElementById('file-input');
+        const fileListEl = document.getElementById('file-list');
+        const mergeBtn = document.getElementById('merge-btn');
+        const statusText = document.getElementById('status-text');
+        
+        // Signature DOM
+        const sigModal = document.getElementById('sig-modal');
+        const canvas = document.getElementById('sig-canvas');
+        const ctx = canvas.getContext('2d');
+        const sigConfig = document.getElementById('sig-config');
+        const sigPreviewImg = document.getElementById('sig-preview-img');
+        const btnOpenSig = document.getElementById('btn-open-sig');
+
+        // Init Sortable
+        new Sortable(fileListEl, { animation: 150, handle: '.file-card', ghostClass: 'dragging' });
+
+        // --- File Upload Logic ---
+        dropArea.addEventListener('click', () => fileInput.click());
+        dropArea.addEventListener('dragover', (e) => { e.preventDefault(); dropArea.classList.add('drag-over'); });
+        dropArea.addEventListener('dragleave', (e) => { e.preventDefault(); dropArea.classList.remove('drag-over'); });
+        dropArea.addEventListener('drop', (e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); });
+        fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); fileInput.value = ''; });
+
+        async function handleFiles(files) {
+            for (const file of files) {
+                if (['application/pdf', 'image/jpeg', 'image/png'].includes(file.type)) {
+                    await addFileToList(file);
+                }
+            }
+            updateUI();
+        }
+
+        async function addFileToList(file) {
+            const id = 'f_' + Math.random().toString(36).substr(2, 9);
+            const isImage = file.type.startsWith('image/');
+            let thumbUrl = null;
+            let settings = isImage ? { scale: 0.8, align: 'cc' } : null;
+
+            if (isImage) {
+                thumbUrl = await readFileAsDataURL(file);
+            }
+
+            filesMap.set(id, { file, type: isImage ? 'image' : 'pdf', thumb: thumbUrl, settings });
+
+            const li = document.createElement('li');
+            li.className = 'list-item-wrapper';
+            li.setAttribute('data-id', id);
+            
+            const settingsHtml = isImage ? buildImageSettingsHtml(id, settings) : '';
+            const iconHtml = isImage ? `<img src="${thumbUrl}">` : '<i class="fas fa-file-pdf" style="color:#ff5252; font-size:18px;"></i>';
+            const btnSetHtml = isImage ? `<button onclick="toggleSettings('${id}', this)"><i class="fas fa-sliders-h"></i></button>` : '';
+
+            li.innerHTML = `
+                <div class="file-card">
+                    <div class="file-info">
+                        <div class="thumb-box">${iconHtml}</div>
+                        <div class="file-name">${file.name}</div>
+                    </div>
+                    <div class="card-actions">
+                        ${btnSetHtml}
+                        <button onclick="removeFile('${id}')"><i class="fas fa-trash-alt"></i></button>
+                    </div>
+                </div>
+                ${settingsHtml}
+            `;
+            fileListEl.appendChild(li);
+        }
+
+        function buildImageSettingsHtml(id, s) {
+            return `
+                <div class="settings-panel" id="set-${id}">
+                    <div class="settings-row">
+                        <span class="settings-label">缩放:</span>
+                        <input type="range" min="10" max="100" value="${s.scale*100}" oninput="updateScale('${id}', this.value)">
+                    </div>
+                    <div class="settings-row">
+                        <span class="settings-label">位置:</span>
+                        <div class="align-grid">
+                            ${['tl','tc','tr','cl','cc','cr','bl','bc','br'].map(p => 
+                                `<div class="align-btn ${p} ${p===s.align?'active':''}" onclick="updateAlign('${id}','${p}',this)"></div>`
+                            ).join('')}
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        // --- Signature Logic (Canvas) ---
+        let isDrawing = false;
+        
+        // 设置 Canvas 尺寸 (Handle retina)
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = 200;
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#000'; // 黑色笔迹
+        }
+
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX || e.touches[0].clientX) - rect.left;
+            const y = (e.clientY || e.touches[0].clientY) - rect.top;
+            return { x, y };
+        }
+
+        // Drawing Events
+        canvas.addEventListener('mousedown', (e) => { isDrawing = true; ctx.beginPath(); const p = getPos(e); ctx.moveTo(p.x, p.y); });
+        canvas.addEventListener('mousemove', (e) => { if(!isDrawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+        canvas.addEventListener('mouseup', () => { isDrawing = false; });
+        
+        // Touch Events
+        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); isDrawing = true; ctx.beginPath(); const p = getPos(e); ctx.moveTo(p.x, p.y); });
+        canvas.addEventListener('touchmove', (e) => { e.preventDefault(); if(!isDrawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+        canvas.addEventListener('touchend', () => { isDrawing = false; });
+
+        btnOpenSig.addEventListener('click', () => {
+            sigModal.style.display = 'flex';
+            requestAnimationFrame(resizeCanvas); // Wait for render
+        });
+
+        window.closeSigModal = () => sigModal.style.display = 'none';
+        window.clearCanvas = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        window.saveSignature = () => {
+            // Export as PNG
+            signatureData = canvas.toDataURL('image/png');
+            sigPreviewImg.src = signatureData;
+            
+            // Show Config
+            sigConfig.classList.add('active');
+            btnOpenSig.innerText = '修改签名';
+            closeSigModal();
+        }
+
+        window.removeSignature = () => {
+            signatureData = null;
+            sigConfig.classList.remove('active');
+            btnOpenSig.innerText = '+ 创建签名';
+        }
+
+        window.setSigAlign = (align, btn) => {
+            sigSettings.align = align;
+            const parent = btn.parentElement;
+            parent.querySelectorAll('.align-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+
+        // --- Global UI Helpers ---
+        window.removeFile = (id) => { filesMap.delete(id); document.querySelector(`li[data-id="${id}"]`).remove(); updateUI(); }
+        window.toggleSettings = (id, btn) => { document.getElementById(`set-${id}`).classList.toggle('show'); btn.style.color = document.getElementById(`set-${id}`).classList.contains('show') ? 'var(--accent)' : ''; }
+        window.updateScale = (id, v) => filesMap.get(id).settings.scale = v / 100;
+        window.updateAlign = (id, a, btn) => { 
+            filesMap.get(id).settings.align = a; 
+            btn.parentElement.querySelectorAll('.align-btn').forEach(b => b.classList.remove('active')); 
+            btn.classList.add('active'); 
+        }
+        function updateUI() { mergeBtn.classList.toggle('active', filesMap.size > 0); statusText.innerText = filesMap.size > 0 ? `共 ${filesMap.size} 个文件` : '请添加文件...'; }
+        function readFileAsDataURL(file) { return new Promise(r => { const fr = new FileReader(); fr.onload = e => r(e.target.result); fr.readAsDataURL(file); }); }
+
+        // --- Generate PDF Logic ---
+        mergeBtn.addEventListener('click', async () => {
+            if(filesMap.size === 0) return;
+            setLoading(true);
+
+            try {
+                const outputDoc = await PDFDocument.create();
+                const listItems = fileListEl.querySelectorAll('.list-item-wrapper');
+                let sigImageEmbed = null;
+
+                // 1. 预处理签名图片 (如果存在)
+                if(signatureData) {
+                    sigImageEmbed = await outputDoc.embedPng(signatureData);
+                }
+
+                // 2. 合并文件
+                for (const item of listItems) {
+                    const id = item.getAttribute('data-id');
+                    const data = filesMap.get(id);
+                    const arrayBuffer = await data.file.arrayBuffer();
+
+                    if (data.type === 'pdf') {
+                        const srcPdf = await PDFDocument.load(arrayBuffer);
+                        const copiedPages = await outputDoc.copyPages(srcPdf, srcPdf.getPageIndices());
+                        copiedPages.forEach(page => outputDoc.addPage(page));
+                    } else {
+                        // 处理图片 (Image Layout)
+                        let img;
+                        if(data.file.type.includes('png')) img = await outputDoc.embedPng(arrayBuffer);
+                        else img = await outputDoc.embedJpg(arrayBuffer);
+                        
+                        const page = outputDoc.addPage([A4_WIDTH, A4_HEIGHT]);
+                        const { scale, align } = data.settings;
+                        
+                        // Calculate Image Layout
+                        const dims = img.scale(1);
+                        const maxW = A4_WIDTH - MARGIN*2;
+                        const maxH = A4_HEIGHT - MARGIN*2;
+                        const baseScale = Math.min(maxW/dims.width, maxH/dims.height);
+                        const finalScale = baseScale * scale;
+                        const w = dims.width * finalScale;
+                        const h = dims.height * finalScale;
+                        
+                        const { x, y } = calcPos(align, w, h);
+                        page.drawImage(img, { x, y, width: w, height: h });
+                    }
+                }
+
+                // 3. 应用签名 (Overlay)
+                if(sigImageEmbed) {
+                    const pages = outputDoc.getPages();
+                    const scope = document.getElementById('sig-scope').value;
+                    const scalePercent = document.getElementById('sig-scale').value / 100; // e.g. 0.3
+                    
+                    // 计算签名尺寸 (相对于 A4 宽度的比例)
+                    // 假设签名原图比较大，我们限制它为 A4 宽度的 20% ~ 60%
+                    const sigDims = sigImageEmbed.scale(1);
+                    // 标准化缩放：让签名宽度占页面宽度的百分比
+                    const targetWidth = A4_WIDTH * scalePercent; 
+                    const ratio = targetWidth / sigDims.width;
+                    const w = targetWidth;
+                    const h = sigDims.height * ratio;
+                    
+                    const { x, y } = calcPos(sigSettings.align, w, h); // 使用通用的位置计算
+
+                    // 确定要签名的页面索引
+                    let targetIndices = [];
+                    if (scope === 'all') {
+                        targetIndices = pages.map((_, i) => i);
+                    } else if (scope === 'first') {
+                        targetIndices = [0];
+                    } else if (scope === 'last') {
+                        targetIndices = [pages.length - 1];
+                    }
+
+                    targetIndices.forEach(idx => {
+                        if(pages[idx]) {
+                            pages[idx].drawImage(sigImageEmbed, { x, y, width: w, height: h });
+                        }
+                    });
+                }
+
+                const pdfBytes = await outputDoc.save();
+                downloadBlob(pdfBytes, 'signed-document.pdf', 'application/pdf');
+
+            } catch(e) {
+                console.error(e);
+                alert("生成失败: " + e.message);
+            } finally {
+                setLoading(false);
+            }
+        });
+
+        // 通用位置计算 (左下角为 0,0)
+        function calcPos(align, w, h) {
+            let x, y;
+            // X
+            if (align.includes('l')) x = MARGIN;
+            else if (align.includes('r')) x = A4_WIDTH - MARGIN - w;
+            else x = (A4_WIDTH - w) / 2;
+            // Y
+            if (align.includes('t')) y = A4_HEIGHT - MARGIN - h;
+            else if (align.includes('b')) y = MARGIN;
+            else y = (A4_HEIGHT - h) / 2;
+            return { x, y };
+        }
+
+        function setLoading(v) { mergeBtn.disabled = v; document.getElementById('loader').style.display=v?'block':'none'; document.getElementById('btn-text').innerText=v?'处理中...':'生成 PDF'; mergeBtn.style.opacity=v?0.7:1; }
+        function downloadBlob(data, name, type) { const b = new Blob([data],{type}); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href=u; a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>URL.revokeObjectURL(u),100); }
+
+    </script>
+</body>
+</html>
