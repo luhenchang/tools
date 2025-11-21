@@ -5,8 +5,14 @@ const MARGIN = 20;
 
 let filesMap = new Map();
 let signatureData = null;
-let sigSettings = { align: 'br', scope: 'last' };
-let currentMode = 'merge'; // 默认为合并模式: 'merge' | 'image'
+// 签名设置：改用百分比坐标 (相对于A4纸左下角)
+// x: 0~1, y: 0~1, width: 100 (absolute points width usually around 100-200)
+let sigSettings = {
+    xPercent: 0.7, // 默认靠右
+    yPercent: 0.1, // 默认靠下
+    width: 150     // 默认宽度点数
+};
+let currentMode = 'merge';
 
 // DOM Elements
 const dropArea = document.getElementById('drop-area');
@@ -30,6 +36,13 @@ const sigConfig = document.getElementById('sig-config');
 const sigPreviewImg = document.getElementById('sig-preview-img');
 const btnOpenSig = document.getElementById('btn-open-sig');
 
+// Placement DOM
+const placementModal = document.getElementById('placement-modal');
+const a4Container = document.getElementById('a4-preview-container');
+const draggableSig = document.getElementById('draggable-sig');
+const dragSigImg = document.getElementById('drag-sig-img');
+const dragScaleSlider = document.getElementById('drag-scale-slider');
+
 // Init Sortable
 new Sortable(fileListEl, { animation: 150, handle: '.file-card', ghostClass: 'dragging' });
 
@@ -38,10 +51,8 @@ switchMode('merge');
 
 function switchMode(mode) {
     currentMode = mode;
-
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     document.getElementById(mode === 'merge' ? 'tab-merge' : 'tab-image').classList.add('active');
-
     filesMap.clear();
     fileListEl.innerHTML = '';
     updateUI();
@@ -56,7 +67,6 @@ function switchMode(mode) {
         document.getElementById('btn-text').innerText = '生成 PDF';
     }
 }
-
 window.switchMode = switchMode;
 
 // --- File Upload Logic ---
@@ -66,11 +76,8 @@ dropArea.addEventListener('dragleave', (e) => { e.preventDefault(); dropArea.cla
 dropArea.addEventListener('drop', (e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); });
 fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); fileInput.value = ''; });
 
-// 修改后的 handleFiles：基于字节的真实进度
 async function handleFiles(files) {
     if (!files.length) return;
-
-    // 1. 筛选有效文件并计算总大小
     const validFiles = Array.from(files).filter(file => {
         if (currentMode === 'merge') return file.type === 'application/pdf';
         if (currentMode === 'image') return ['image/jpeg', 'image/png'].includes(file.type);
@@ -80,90 +87,59 @@ async function handleFiles(files) {
     if (validFiles.length === 0) return;
 
     const totalSize = validFiles.reduce((sum, f) => sum + f.size, 0);
-    let globalLoaded = 0; // 全局已加载字节数
+    let globalLoaded = 0;
 
-    // 2. 初始化进度条 UI
     progressContainer.style.display = 'block';
-    // 强制浏览器重绘，确保进度条背景立即显示
     progressContainer.getBoundingClientRect();
     updateProgressBar(0);
     progressStatus.innerText = '准备导入...';
 
-    // 3. 逐个处理
     for (const file of validFiles) {
         progressStatus.innerText = `正在读取: ${file.name}`;
         let thumbUrl = null;
 
-        // 只有图片模式需要真正“读取”内容来生成缩略图
         if (currentMode === 'image' && file.type.startsWith('image/')) {
             try {
                 thumbUrl = await readFileWithProgress(file, (fileLoadedBytes) => {
-                    // 当前文件已读 + 之前文件总大小 = 全局进度
                     updateProgressBar((globalLoaded + fileLoadedBytes) / totalSize);
                 });
-            } catch (err) {
-                console.error("读取失败:", file.name, err);
-            }
+            } catch (err) { console.error(err); }
         } else {
-            // PDF 模式：不需要读取内容，但为了 UI 不会瞬间闪烁（例如 0->100%），
-            // 尤其是在文件很小的时候，给一个极短的缓冲
             updateProgressBar(globalLoaded / totalSize);
             await new Promise(r => setTimeout(r, 20));
         }
 
-        // 添加到列表 (这部分是同步的，很快)
         addFileToList(file, thumbUrl);
-
-        // 完成当前文件，更新全局累加器
         globalLoaded += file.size;
         updateProgressBar(globalLoaded / totalSize);
-
-        // 给 UI 线程喘息机会，防止界面卡死
         await new Promise(r => requestAnimationFrame(r));
     }
 
-    // 4. 完成处理
     progressStatus.innerText = '导入完成';
-    updateProgressBar(1); // 确保满格
-
-    setTimeout(() => {
-        progressContainer.style.display = 'none';
-        progressFill.style.width = '0%'; // 重置
-        updateUI();
-    }, 600);
+    updateProgressBar(1);
+    setTimeout(() => { progressContainer.style.display = 'none'; progressFill.style.width = '0%'; updateUI(); }, 600);
 }
 
-// 辅助函数：更新进度条 UI
 function updateProgressBar(percentage) {
     const pct = Math.min(100, Math.round(percentage * 100));
     progressFill.style.width = `${pct}%`;
     progressText.innerText = `${pct}%`;
 }
 
-// 辅助函数：带进度的文件读取
 function readFileWithProgress(file, onProgress) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
-
-        reader.onprogress = (e) => {
-            if (e.lengthComputable && onProgress) {
-                onProgress(e.loaded);
-            }
-        };
-
+        reader.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded); };
         reader.onload = (e) => resolve(e.target.result);
         reader.onerror = (e) => reject(e);
-
         reader.readAsDataURL(file);
     });
 }
 
-// 修改后的 addFileToList：不再负责读取文件，直接接收 thumbUrl
 function addFileToList(file, thumbUrl) {
     const id = 'f_' + Math.random().toString(36).substr(2, 9);
     const isImage = file.type.startsWith('image/');
-    let settings = isImage ? { scale: 0.8, align: 'cc' } : null;
-
+    let settings = isImage ? { scale: 0.8, align: 'cc' } : null; // 仅用于图片转PDF的排版
     filesMap.set(id, { file, type: isImage ? 'image' : 'pdf', thumb: thumbUrl, settings });
 
     const li = document.createElement('li');
@@ -191,6 +167,7 @@ function addFileToList(file, thumbUrl) {
 }
 
 function buildImageSettingsHtml(id, s) {
+    // 图片转PDF的简单排版设置（保留，以防用户需要）
     return `
         <div class="settings-panel" id="set-${id}">
             <div class="settings-row">
@@ -208,30 +185,44 @@ function buildImageSettingsHtml(id, s) {
         </div>`;
 }
 
-// --- Signature Logic ---
+// --- Signature Logic (Canvas) ---
 let isDrawing = false;
 
+// 修复：使用 rect 获取真实尺寸，防止鼠标偏移
 function resizeCanvas() {
-    const rect = canvas.parentElement.getBoundingClientRect();
+    const rect = canvas.getBoundingClientRect();
     canvas.width = rect.width;
-    canvas.height = 200;
+    canvas.height = rect.height;
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
     ctx.strokeStyle = '#000';
 }
 
+// 修复：增加缩放因子计算
 function getPos(e) {
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX || e.touches[0].clientX) - rect.left;
-    const y = (e.clientY || e.touches[0].clientY) - rect.top;
-    return { x, y };
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    const clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    const clientY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+
+    return {
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
+    };
 }
+
+// 防止触摸滚动
+const stopTouchScroll = (e) => { if(e.target === canvas) e.preventDefault(); }
+document.body.addEventListener('touchstart', stopTouchScroll, { passive: false });
+document.body.addEventListener('touchmove', stopTouchScroll, { passive: false });
 
 canvas.addEventListener('mousedown', (e) => { isDrawing = true; ctx.beginPath(); const p = getPos(e); ctx.moveTo(p.x, p.y); });
 canvas.addEventListener('mousemove', (e) => { if(!isDrawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
 canvas.addEventListener('mouseup', () => { isDrawing = false; });
-canvas.addEventListener('touchstart', (e) => { e.preventDefault(); isDrawing = true; ctx.beginPath(); const p = getPos(e); ctx.moveTo(p.x, p.y); });
-canvas.addEventListener('touchmove', (e) => { e.preventDefault(); if(!isDrawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+canvas.addEventListener('touchstart', (e) => { isDrawing = true; ctx.beginPath(); const p = getPos(e); ctx.moveTo(p.x, p.y); });
+canvas.addEventListener('touchmove', (e) => { if(!isDrawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
 canvas.addEventListener('touchend', () => { isDrawing = false; });
 
 btnOpenSig.addEventListener('click', () => {
@@ -240,10 +231,11 @@ btnOpenSig.addEventListener('click', () => {
 });
 
 window.closeSigModal = () => sigModal.style.display = 'none';
-window.clearCanvas = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
+window.clearCanvas = () => { ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.beginPath(); };
 window.saveSignature = () => {
     signatureData = canvas.toDataURL('image/png');
     sigPreviewImg.src = signatureData;
+    dragSigImg.src = signatureData; // 更新拖拽预览图
     sigConfig.classList.add('active');
     btnOpenSig.innerText = '修改签名';
     closeSigModal();
@@ -253,12 +245,130 @@ window.removeSignature = () => {
     sigConfig.classList.remove('active');
     btnOpenSig.innerText = '+ 创建签名';
 }
-window.setSigAlign = (align, btn) => {
-    sigSettings.align = align;
-    const parent = btn.parentElement;
-    parent.querySelectorAll('.align-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
+
+// --- Visual Placement Logic (New) ---
+window.openPlacementModal = () => {
+    if (!signatureData) { alert('请先创建签名'); return; }
+    placementModal.style.display = 'flex';
+    // 初始化位置 (如果没有设置过，默认放在右下角)
+    updateDraggableVisuals();
 }
+window.closePlacementModal = () => {
+    // 保存位置：计算当前 DOM 元素相对于容器的百分比
+    const containerRect = a4Container.getBoundingClientRect();
+    const sigRect = draggableSig.getBoundingClientRect();
+
+    // 计算左上角相对位置 (0~1)
+    const relativeLeft = (sigRect.left - containerRect.left) / containerRect.width;
+    const relativeTop = (sigRect.top - containerRect.top) / containerRect.height;
+
+    // PDF 坐标系：X 是从左往右，Y 是从下往上
+    // 我们保存 xPercent (Left) 和 yPercent (Bottom)
+    sigSettings.xPercent = relativeLeft;
+    // Bottom = 1 - (Top + Height)
+    const relativeHeight = sigRect.height / containerRect.height;
+    sigSettings.yPercent = 1 - (relativeTop + relativeHeight);
+
+    // 保存宽度 (以 A4 宽度为基准的缩放)
+    // 这里的 scale slider 值对应的是显示宽度 px，我们需要把它换算成 PDF 点数
+    // A4 宽度 595.28pt。 预览容器宽度 300px。
+    // 比例因子 = 595.28 / 300 ≈ 1.98
+    // 真实宽度 = 显示宽度 * (595.28 / 300)
+    const displayWidth = draggableSig.offsetWidth;
+    sigSettings.width = displayWidth * (A4_WIDTH / containerRect.width);
+
+    placementModal.style.display = 'none';
+}
+
+function updateDraggableVisuals() {
+    const containerRect = a4Container.getBoundingClientRect(); // 300 x 424
+    // 反向计算：从 stored settings -> pixel values
+    // Width
+    const displayWidth = sigSettings.width * (containerRect.width / A4_WIDTH);
+    draggableSig.style.width = `${displayWidth}px`;
+    dragScaleSlider.value = displayWidth; // 这里的滑块直接控制 px 宽度
+
+    // Position
+    // Left = xPercent * containerWidth
+    const leftPx = sigSettings.xPercent * containerRect.width;
+    // Top = (1 - yPercent) * containerHeight - Height
+    const displayHeight = (displayWidth / dragSigImg.naturalWidth) * dragSigImg.naturalHeight || 60; // 估算高度
+    const topPx = (1 - sigSettings.yPercent) * containerRect.height - displayHeight;
+
+    draggableSig.style.left = `${leftPx}px`;
+    draggableSig.style.top = `${topPx}px`;
+}
+
+// 拖拽逻辑
+let isDraggingSig = false;
+let dragStart = { x: 0, y: 0 };
+let sigStart = { left: 0, top: 0 };
+
+draggableSig.addEventListener('mousedown', startDrag);
+draggableSig.addEventListener('touchstart', startDrag, {passive: false});
+
+function startDrag(e) {
+    e.preventDefault();
+    isDraggingSig = true;
+    draggableSig.classList.add('dragging');
+
+    const clientX = e.clientX || e.touches[0].clientX;
+    const clientY = e.clientY || e.touches[0].clientY;
+
+    dragStart = { x: clientX, y: clientY };
+    sigStart = {
+        left: draggableSig.offsetLeft,
+        top: draggableSig.offsetTop
+    };
+
+    document.addEventListener('mousemove', onDrag);
+    document.addEventListener('mouseup', stopDrag);
+    document.addEventListener('touchmove', onDrag, {passive: false});
+    document.addEventListener('touchend', stopDrag);
+}
+
+function onDrag(e) {
+    if (!isDraggingSig) return;
+    e.preventDefault(); // 防止手机滚动
+
+    const clientX = e.clientX || e.touches[0].clientX;
+    const clientY = e.clientY || e.touches[0].clientY;
+
+    const dx = clientX - dragStart.x;
+    const dy = clientY - dragStart.y;
+
+    // 限制在容器内
+    const containerW = a4Container.offsetWidth;
+    const containerH = a4Container.offsetHeight;
+    const sigW = draggableSig.offsetWidth;
+    const sigH = draggableSig.offsetHeight;
+
+    let newLeft = sigStart.left + dx;
+    let newTop = sigStart.top + dy;
+
+    // 边界检查
+    newLeft = Math.max(0, Math.min(newLeft, containerW - sigW));
+    newTop = Math.max(0, Math.min(newTop, containerH - sigH));
+
+    draggableSig.style.left = `${newLeft}px`;
+    draggableSig.style.top = `${newTop}px`;
+}
+
+function stopDrag() {
+    isDraggingSig = false;
+    draggableSig.classList.remove('dragging');
+    document.removeEventListener('mousemove', onDrag);
+    document.removeEventListener('mouseup', stopDrag);
+    document.removeEventListener('touchmove', onDrag);
+    document.removeEventListener('touchend', stopDrag);
+}
+
+// 缩放滑块逻辑
+dragScaleSlider.addEventListener('input', (e) => {
+    const newWidth = parseInt(e.target.value);
+    draggableSig.style.width = `${newWidth}px`;
+});
+
 
 // --- Global UI Helpers ---
 window.removeFile = (id) => { filesMap.delete(id); document.querySelector(`li[data-id="${id}"]`).remove(); updateUI(); }
@@ -307,8 +417,8 @@ mergeBtn.addEventListener('click', async () => {
                 else img = await outputDoc.embedJpg(arrayBuffer);
 
                 const page = outputDoc.addPage([A4_WIDTH, A4_HEIGHT]);
+                // 旧的图片位置逻辑（保留）
                 const { scale, align } = data.settings;
-
                 const dims = img.scale(1);
                 const maxW = A4_WIDTH - MARGIN*2;
                 const maxH = A4_HEIGHT - MARGIN*2;
@@ -322,18 +432,18 @@ mergeBtn.addEventListener('click', async () => {
             }
         }
 
+        // 3. 应用签名 (使用新的拖拽坐标)
         if(sigImageEmbed) {
             const pages = outputDoc.getPages();
             const scope = document.getElementById('sig-scope').value;
-            const scalePercent = document.getElementById('sig-scale').value / 100;
 
-            const sigDims = sigImageEmbed.scale(1);
-            const targetWidth = A4_WIDTH * scalePercent;
-            const ratio = targetWidth / sigDims.width;
-            const w = targetWidth;
-            const h = sigDims.height * ratio;
+            // 计算签名在 PDF 上的实际尺寸和位置
+            const sigImgDims = sigImageEmbed.scale(1);
+            const targetWidth = sigSettings.width; // 已转换好的 PDF 点数宽度
+            const targetHeight = sigImgDims.height * (targetWidth / sigImgDims.width);
 
-            const { x, y } = calcPos(sigSettings.align, w, h);
+            const pdfX = A4_WIDTH * sigSettings.xPercent;
+            const pdfY = A4_HEIGHT * sigSettings.yPercent; // 已经是 bottom-up
 
             let targetIndices = [];
             if (scope === 'all') {
@@ -346,7 +456,12 @@ mergeBtn.addEventListener('click', async () => {
 
             targetIndices.forEach(idx => {
                 if(pages[idx]) {
-                    pages[idx].drawImage(sigImageEmbed, { x, y, width: w, height: h });
+                    pages[idx].drawImage(sigImageEmbed, {
+                        x: pdfX,
+                        y: pdfY,
+                        width: targetWidth,
+                        height: targetHeight
+                    });
                 }
             });
         }
@@ -363,6 +478,7 @@ mergeBtn.addEventListener('click', async () => {
     }
 });
 
+// 旧的九宫格计算（仅给图片转PDF用）
 function calcPos(align, w, h) {
     let x, y;
     if (align.includes('l')) x = MARGIN;

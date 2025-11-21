@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>剪影文档工坊 | Silhouette Studio</title>
-    
+
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
@@ -13,21 +13,23 @@
 </head>
 <body>
 
-    <header>
-        <h1>Silhouette <span>Studio</span></h1>
-        <p>PDF 合并 · 图片排版 · 电子签名</p>
-    </header>
+<header>
+    <h1>Silhouette <span>Studio</span></h1>
+    <p>PDF 合并 · 图片排版 · 电子签名</p>
+</header>
 
-    <div class="app-container">
-        <div class="tabs">
-            <button class="tab-btn active" id="tab-merge" onclick="switchMode('merge')">
-                <i class="fas fa-file-pdf"></i> PDF 合并
-            </button>
-            <button class="tab-btn" id="tab-image" onclick="switchMode('image')">
-                <i class="fas fa-images"></i> 图片转 PDF
-            </button>
-        </div>
+<div class="app-container">
+    <div class="tabs">
+        <button class="tab-btn active" id="tab-merge" onclick="switchMode('merge')">
+            <i class="fas fa-file-pdf"></i> PDF 合并
+        </button>
+        <button class="tab-btn" id="tab-image" onclick="switchMode('image')">
+            <i class="fas fa-images"></i> 图片转 PDF
+        </button>
+    </div>
 
+    <div class="section-block">
+        <div class="section-title">1. 添加文件</div>
         <div class="upload-zone" id="drop-area">
             <i class="fas fa-cloud-upload-alt"></i>
             <div id="drop-text" style="font-size:0.9rem; color:#ccc;">点击添加文件</div>
@@ -36,7 +38,7 @@
 
         <div id="upload-progress-container">
             <div class="progress-info">
-                <span id="progress-status">正在读取文件...</span>
+                <span id="progress-status">正在读取...</span>
                 <span id="upload-progress-text">0%</span>
             </div>
             <div class="progress-bar-bg">
@@ -47,69 +49,89 @@
         <div class="file-list-container">
             <ul class="file-list" id="file-list"></ul>
         </div>
-
-        <div class="signature-section">
-            <div class="sig-header">
-                <span class="sig-title"><i class="fas fa-signature"></i> 电子签名</span>
-                <button class="btn-add-sig" id="btn-open-sig">+ 创建签名</button>
-            </div>
-            
-            <div class="sig-preview-box" id="sig-config">
-                <div class="sig-img-wrap">
-                    <img id="sig-preview-img" src="" alt="Signature">
-                    <button class="btn-del-sig" onclick="removeSignature()">×</button>
-                </div>
-                <div class="sig-controls">
-                    <div class="control-row">
-                        <span>应用范围:</span>
-                        <select class="scope-select" id="sig-scope">
-                            <option value="all">每一页</option>
-                            <option value="last" selected>仅最后一页</option>
-                            <option value="first">仅第一页</option>
-                        </select>
-                    </div>
-                    <div class="control-row">
-                        <span>位置/大小:</span>
-                        <div class="align-grid" style="display:inline-grid; vertical-align:middle; margin-right:10px;">
-                            <div class="align-btn tl" onclick="setSigAlign('tl', this)"></div>
-                            <div class="align-btn tc" onclick="setSigAlign('tc', this)"></div>
-                            <div class="align-btn tr" onclick="setSigAlign('tr', this)"></div>
-                            <div class="align-btn cl" onclick="setSigAlign('cl', this)"></div>
-                            <div class="align-btn cc" onclick="setSigAlign('cc', this)"></div>
-                            <div class="align-btn cr" onclick="setSigAlign('cr', this)"></div>
-                            <div class="align-btn bl" onclick="setSigAlign('bl', this)"></div>
-                            <div class="align-btn bc" onclick="setSigAlign('bc', this)"></div>
-                            <div class="align-btn br active" onclick="setSigAlign('br', this)"></div>
-                        </div>
-                        <input type="range" min="10" max="60" value="30" id="sig-scale" style="width:60px;">
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="action-bar">
-            <span style="color:#888; font-size:0.85rem" id="status-text">准备就绪</span>
-            <button class="btn-merge" id="merge-btn">
-                <div class="loader" id="loader"></div>
-                <span id="btn-text">生成 PDF</span>
-            </button>
-        </div>
     </div>
 
-    <div class="modal-overlay" id="sig-modal">
-        <div class="modal-box">
-            <div class="modal-title">请在下方签署姓名</div>
-            <div class="canvas-wrapper">
-                <canvas id="sig-canvas"></canvas>
+    <div class="section-block signature-section">
+        <div class="sig-header">
+            <div class="section-title" style="margin:0">2. 电子签名 (可选)</div>
+            <button class="btn-add-sig" id="btn-open-sig">+ 创建/修改签名</button>
+        </div>
+
+        <div class="sig-preview-box" id="sig-config">
+            <div class="sig-img-wrap">
+                <img id="sig-preview-img" src="" alt="Signature">
+                <button class="btn-del-sig" onclick="removeSignature()">×</button>
             </div>
-            <div class="modal-actions">
-                <button class="btn-modal btn-cancel" onclick="closeSigModal()">取消</button>
-                <button class="btn-modal btn-clear" onclick="clearCanvas()">清除</button>
-                <button class="btn-modal btn-save" onclick="saveSignature()">确认使用</button>
+
+            <div class="sig-controls">
+                <div class="control-row">
+                    <span>应用范围:</span>
+                    <select class="scope-select" id="sig-scope">
+                        <option value="last" selected>仅最后一页</option>
+                        <option value="first">仅第一页</option>
+                        <option value="all">每一页</option>
+                    </select>
+                </div>
+                <div class="control-row">
+                    <button class="btn-placement" onclick="openPlacementModal()">
+                        <i class="fas fa-arrows-alt"></i> 调整位置与大小
+                    </button>
+                </div>
+                <div class="control-row" style="justify-content: flex-start; gap: 10px; font-size: 0.75rem; color: #666;">
+                    <i class="fas fa-info-circle"></i> <span>点击上方按钮可拖拽调整位置</span>
+                </div>
             </div>
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <div class="action-bar">
+        <span style="color:#888; font-size:0.85rem" id="status-text">准备就绪</span>
+        <button class="btn-merge" id="merge-btn">
+            <div class="loader" id="loader"></div>
+            <span id="btn-text">生成 PDF</span>
+        </button>
+    </div>
+</div>
+
+<div class="modal-overlay" id="sig-modal">
+    <div class="modal-box">
+        <div class="modal-title">请在下方签署姓名</div>
+        <div class="canvas-wrapper">
+            <canvas id="sig-canvas"></canvas>
+        </div>
+        <div class="modal-actions">
+            <button class="btn-modal btn-cancel" onclick="closeSigModal()">取消</button>
+            <button class="btn-modal btn-clear" onclick="clearCanvas()">清除</button>
+            <button class="btn-modal btn-save" onclick="saveSignature()">确认使用</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="placement-modal">
+    <div class="modal-box large-modal">
+        <div class="modal-title">拖拽签名调整位置</div>
+
+        <div class="placement-container-wrapper">
+            <div id="a4-preview-container">
+                <div class="grid-lines"></div> <div id="draggable-sig">
+                <img id="drag-sig-img" src="">
+                <div class="resize-handle"></div>
+            </div>
+                <div class="page-label">A4 页面预览</div>
+            </div>
+        </div>
+
+        <div class="placement-controls">
+            <span>签名大小:</span>
+            <input type="range" id="drag-scale-slider" min="20" max="150" value="60">
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn-modal btn-save" onclick="closePlacementModal()">完成调整</button>
+        </div>
+    </div>
+</div>
+
+<script src="script.js"></script>
 </body>
 </html>
