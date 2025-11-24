@@ -6,13 +6,13 @@ const MARGIN = 20;
 let filesMap = new Map();
 let signatureData = null;
 // 签名设置：改用百分比坐标 (相对于A4纸左下角)
-// x: 0~1, y: 0~1, width: 100 (absolute points width usually around 100-200)
 let sigSettings = {
     xPercent: 0.7, // 默认靠右
     yPercent: 0.1, // 默认靠下
     width: 150     // 默认宽度点数
 };
 let currentMode = 'merge';
+let activePdfMetadata = null;
 
 // DOM Elements
 const dropArea = document.getElementById('drop-area');
@@ -21,6 +21,7 @@ const fileInput = document.getElementById('file-input');
 const fileListEl = document.getElementById('file-list');
 const mergeBtn = document.getElementById('merge-btn');
 const statusText = document.getElementById('status-text');
+const mainSection = document.getElementById('main-section');
 
 // Progress DOM
 const progressContainer = document.getElementById('upload-progress-container');
@@ -43,6 +44,36 @@ const draggableSig = document.getElementById('draggable-sig');
 const dragSigImg = document.getElementById('drag-sig-img');
 const dragScaleSlider = document.getElementById('drag-scale-slider');
 
+// --- Image Editor DOM ---
+const editorSection = document.getElementById('editor-section');
+const editorDropArea = document.getElementById('editor-drop-area');
+const editorWorkspace = document.getElementById('editor-workspace');
+const editorImage = document.getElementById('editor-image');
+const editHue = document.getElementById('edit-hue');
+const editSat = document.getElementById('edit-sat');
+const valHue = document.getElementById('val-hue');
+const valSat = document.getElementById('val-sat');
+const btnToggleCrop = document.getElementById('btn-toggle-crop');
+const cropActions = document.getElementById('crop-actions');
+const btnConfirmCrop = document.getElementById('btn-confirm-crop');
+const btnCancelCrop = document.getElementById('btn-cancel-crop');
+const editW = document.getElementById('edit-w');
+const editH = document.getElementById('edit-h');
+const lockRatio = document.getElementById('lock-ratio');
+const btnApplyResize = document.getElementById('btn-apply-resize');
+const btnResetEdit = document.getElementById('btn-reset-edit');
+const btnDownloadEdit = document.getElementById('btn-download-edit');
+
+let editorState = {
+    originalUrl: null,
+    currentUrl: null,
+    hue: 0,
+    sat: 100,
+    cropper: null,
+    isCropping: false
+};
+
+
 // Init Sortable
 new Sortable(fileListEl, { animation: 150, handle: '.file-card', ghostClass: 'dragging' });
 
@@ -52,19 +83,38 @@ switchMode('merge');
 function switchMode(mode) {
     currentMode = mode;
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.getElementById(mode === 'merge' ? 'tab-merge' : 'tab-image').classList.add('active');
-    filesMap.clear();
-    fileListEl.innerHTML = '';
-    updateUI();
 
-    if (mode === 'merge') {
-        dropText.innerHTML = '点击或拖拽添加 <b>PDF 文件</b> 进行合并';
-        fileInput.accept = 'application/pdf';
-        document.getElementById('btn-text').innerText = '开始合并 PDF';
-    } else {
-        dropText.innerHTML = '点击或拖拽添加 <b>图片 (JPG/PNG)</b> 生成 PDF';
+    // Update Tab Active State
+    if (mode === 'merge') document.getElementById('tab-merge').classList.add('active');
+    else if (mode === 'image') document.getElementById('tab-image').classList.add('active');
+    else if (mode === 'word') document.getElementById('tab-word').classList.add('active');
+    else if (mode === 'editor') document.getElementById('tab-editor').classList.add('active');
+
+    // Toggle Sections
+    if (mode === 'editor') {
+        mainSection.style.display = 'none';
+        editorSection.style.display = 'block';
         fileInput.accept = 'image/jpeg, image/png';
-        document.getElementById('btn-text').innerText = '生成 PDF';
+    } else {
+        mainSection.style.display = 'block';
+        editorSection.style.display = 'none';
+        filesMap.clear();
+        fileListEl.innerHTML = '';
+        updateUI();
+
+        if (mode === 'merge') {
+            dropText.innerHTML = '点击或拖拽添加 <b>PDF 文件</b> 进行合并';
+            fileInput.accept = 'application/pdf';
+            document.getElementById('btn-text').innerText = '开始合并 PDF';
+        } else if (mode === 'image') {
+            dropText.innerHTML = '点击或拖拽添加 <b>图片 (JPG/PNG)</b> 生成 PDF';
+            fileInput.accept = 'image/jpeg, image/png';
+            document.getElementById('btn-text').innerText = '生成 PDF';
+        } else if (mode === 'word') {
+            dropText.innerHTML = '点击或拖拽添加 <b>Word 文件 (.docx)</b> 转 PDF';
+            fileInput.accept = '.docx';
+            document.getElementById('btn-text').innerText = '开始转换';
+        }
     }
 }
 window.switchMode = switchMode;
@@ -74,17 +124,52 @@ dropArea.addEventListener('click', () => fileInput.click());
 dropArea.addEventListener('dragover', (e) => { e.preventDefault(); dropArea.classList.add('drag-over'); });
 dropArea.addEventListener('dragleave', (e) => { e.preventDefault(); dropArea.classList.remove('drag-over'); });
 dropArea.addEventListener('drop', (e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); });
+
+// Editor Drop Area
+editorDropArea.addEventListener('click', () => fileInput.click());
+editorDropArea.addEventListener('dragover', (e) => { e.preventDefault(); editorDropArea.classList.add('drag-over'); });
+editorDropArea.addEventListener('dragleave', (e) => { e.preventDefault(); editorDropArea.classList.remove('drag-over'); });
+editorDropArea.addEventListener('drop', (e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); });
+
 fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); fileInput.value = ''; });
 
 async function handleFiles(files) {
     if (!files.length) return;
+
+    // Editor Mode Handling
+    if (currentMode === 'editor') {
+        const file = files[0];
+        if (!['image/jpeg', 'image/png'].includes(file.type)) {
+            alert('仅支持 JPG/PNG 图片编辑');
+            return;
+        }
+        loadEditorImage(file);
+        return;
+    }
+
+    // Existing Logic for Merge/Image2PDF/Word2PDF
     const validFiles = Array.from(files).filter(file => {
         if (currentMode === 'merge') return file.type === 'application/pdf';
         if (currentMode === 'image') return ['image/jpeg', 'image/png'].includes(file.type);
+        if (currentMode === 'word') return file.name.endsWith('.docx');
         return false;
     });
 
     if (validFiles.length === 0) return;
+
+    // Capture PDF Metadata for the first PDF (for Preview Sizing)
+    if (currentMode === 'merge' && !activePdfMetadata) {
+        try {
+            const arrayBuffer = await validFiles[0].arrayBuffer();
+            const pdfDoc = await PDFDocument.load(arrayBuffer);
+            const firstPage = pdfDoc.getPages()[0];
+            const { width, height } = firstPage.getSize();
+            const rotation = firstPage.getRotation().angle;
+            activePdfMetadata = { width, height, rotation };
+        } catch (e) {
+            console.error("Failed to read PDF metadata", e);
+        }
+    }
 
     const totalSize = validFiles.reduce((sum, f) => sum + f.size, 0);
     let globalLoaded = 0;
@@ -147,7 +232,8 @@ function addFileToList(file, thumbUrl) {
     li.setAttribute('data-id', id);
 
     const settingsHtml = (isImage && currentMode === 'image') ? buildImageSettingsHtml(id, settings) : '';
-    const iconHtml = isImage ? `<img src="${thumbUrl}">` : '<i class="fas fa-file-pdf" style="color:#ff5252; font-size:18px;"></i>';
+    const iconHtml = isImage ? `<img src="${thumbUrl}">` :
+        (file.name.endsWith('.docx') ? '<i class="fas fa-file-word" style="color:#2b579a; font-size:18px;"></i>' : '<i class="fas fa-file-pdf" style="color:#ff5252; font-size:18px;"></i>');
     const btnSetHtml = (isImage && currentMode === 'image') ? `<button onclick="toggleSettings('${id}', this)"><i class="fas fa-sliders-h"></i></button>` : '';
 
     li.innerHTML = `
@@ -167,18 +253,17 @@ function addFileToList(file, thumbUrl) {
 }
 
 function buildImageSettingsHtml(id, s) {
-    // 图片转PDF的简单排版设置（保留，以防用户需要）
     return `
         <div class="settings-panel" id="set-${id}">
             <div class="settings-row">
                 <span class="settings-label">缩放:</span>
-                <input type="range" min="10" max="100" value="${s.scale*100}" oninput="updateScale('${id}', this.value)">
+                <input type="range" min="10" max="100" value="${s.scale * 100}" oninput="updateScale('${id}', this.value)">
             </div>
             <div class="settings-row">
                 <span class="settings-label">位置:</span>
                 <div class="align-grid">
-                    ${['tl','tc','tr','cl','cc','cr','bl','bc','br'].map(p =>
-        `<div class="align-btn ${p} ${p===s.align?'active':''}" onclick="updateAlign('${id}','${p}',this)"></div>`
+                    ${['tl', 'tc', 'tr', 'cl', 'cc', 'cr', 'bl', 'bc', 'br'].map(p =>
+        `<div class="align-btn ${p} ${p === s.align ? 'active' : ''}" onclick="updateAlign('${id}','${p}',this)"></div>`
     ).join('')}
                 </div>
             </div>
@@ -188,7 +273,6 @@ function buildImageSettingsHtml(id, s) {
 // --- Signature Logic (Canvas) ---
 let isDrawing = false;
 
-// 修复：使用 rect 获取真实尺寸，防止鼠标偏移
 function resizeCanvas() {
     const rect = canvas.getBoundingClientRect();
     canvas.width = rect.width;
@@ -198,7 +282,6 @@ function resizeCanvas() {
     ctx.strokeStyle = '#000';
 }
 
-// 修复：增加缩放因子计算
 function getPos(e) {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -213,16 +296,15 @@ function getPos(e) {
     };
 }
 
-// 防止触摸滚动
-const stopTouchScroll = (e) => { if(e.target === canvas) e.preventDefault(); }
+const stopTouchScroll = (e) => { if (e.target === canvas) e.preventDefault(); }
 document.body.addEventListener('touchstart', stopTouchScroll, { passive: false });
 document.body.addEventListener('touchmove', stopTouchScroll, { passive: false });
 
 canvas.addEventListener('mousedown', (e) => { isDrawing = true; ctx.beginPath(); const p = getPos(e); ctx.moveTo(p.x, p.y); });
-canvas.addEventListener('mousemove', (e) => { if(!isDrawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+canvas.addEventListener('mousemove', (e) => { if (!isDrawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
 canvas.addEventListener('mouseup', () => { isDrawing = false; });
 canvas.addEventListener('touchstart', (e) => { isDrawing = true; ctx.beginPath(); const p = getPos(e); ctx.moveTo(p.x, p.y); });
-canvas.addEventListener('touchmove', (e) => { if(!isDrawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+canvas.addEventListener('touchmove', (e) => { if (!isDrawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
 canvas.addEventListener('touchend', () => { isDrawing = false; });
 
 btnOpenSig.addEventListener('click', () => {
@@ -235,7 +317,7 @@ window.clearCanvas = () => { ctx.clearRect(0, 0, canvas.width, canvas.height); c
 window.saveSignature = () => {
     signatureData = canvas.toDataURL('image/png');
     sigPreviewImg.src = signatureData;
-    dragSigImg.src = signatureData; // 更新拖拽预览图
+    dragSigImg.src = signatureData;
     sigConfig.classList.add('active');
     btnOpenSig.innerText = '修改签名';
     closeSigModal();
@@ -250,30 +332,19 @@ window.removeSignature = () => {
 window.openPlacementModal = () => {
     if (!signatureData) { alert('请先创建签名'); return; }
     placementModal.style.display = 'flex';
-    // 初始化位置 (如果没有设置过，默认放在右下角)
     updateDraggableVisuals();
 }
 window.closePlacementModal = () => {
-    // 保存位置：计算当前 DOM 元素相对于容器的百分比
     const containerRect = a4Container.getBoundingClientRect();
     const sigRect = draggableSig.getBoundingClientRect();
 
-    // 计算左上角相对位置 (0~1)
     const relativeLeft = (sigRect.left - containerRect.left) / containerRect.width;
     const relativeTop = (sigRect.top - containerRect.top) / containerRect.height;
 
-    // PDF 坐标系：X 是从左往右，Y 是从下往上
-    // 我们保存 xPercent (Left) 和 yPercent (Bottom)
     sigSettings.xPercent = relativeLeft;
-    // Bottom = 1 - (Top + Height)
     const relativeHeight = sigRect.height / containerRect.height;
     sigSettings.yPercent = 1 - (relativeTop + relativeHeight);
 
-    // 保存宽度 (以 A4 宽度为基准的缩放)
-    // 这里的 scale slider 值对应的是显示宽度 px，我们需要把它换算成 PDF 点数
-    // A4 宽度 595.28pt。 预览容器宽度 300px。
-    // 比例因子 = 595.28 / 300 ≈ 1.98
-    // 真实宽度 = 显示宽度 * (595.28 / 300)
     const displayWidth = draggableSig.offsetWidth;
     sigSettings.width = displayWidth * (A4_WIDTH / containerRect.width);
 
@@ -281,22 +352,38 @@ window.closePlacementModal = () => {
 }
 
 function updateDraggableVisuals() {
-    const containerRect = a4Container.getBoundingClientRect(); // 300 x 424
-    // 反向计算：从 stored settings -> pixel values
-    // Width
-    const displayWidth = sigSettings.width * (containerRect.width / A4_WIDTH);
-    draggableSig.style.width = `${displayWidth}px`;
-    dragScaleSlider.value = displayWidth; // 这里的滑块直接控制 px 宽度
+    let previewW = 300;
+    let previewH = 424;
 
-    // Position
-    // Left = xPercent * containerWidth
-    const leftPx = sigSettings.xPercent * containerRect.width;
-    // Top = (1 - yPercent) * containerHeight - Height
-    const displayHeight = (displayWidth / dragSigImg.naturalWidth) * dragSigImg.naturalHeight || 60; // 估算高度
-    const topPx = (1 - sigSettings.yPercent) * containerRect.height - displayHeight;
+    if (activePdfMetadata) {
+        const { width, height, rotation } = activePdfMetadata;
+        const isRotated = rotation % 180 !== 0;
+        const effectiveW = isRotated ? height : width;
+        const effectiveH = isRotated ? width : height;
+        const ratio = effectiveH / effectiveW;
 
-    draggableSig.style.left = `${leftPx}px`;
-    draggableSig.style.top = `${topPx}px`;
+        previewH = previewW * ratio;
+        a4Container.style.aspectRatio = `${effectiveW}/${effectiveH}`;
+        a4Container.style.height = `${previewH}px`;
+    } else {
+        a4Container.style.aspectRatio = '210/297';
+        a4Container.style.height = 'auto';
+    }
+
+    requestAnimationFrame(() => {
+        const containerRect = a4Container.getBoundingClientRect();
+
+        const displayWidth = sigSettings.width * (containerRect.width / A4_WIDTH);
+        draggableSig.style.width = `${displayWidth}px`;
+        dragScaleSlider.value = displayWidth;
+
+        const leftPx = sigSettings.xPercent * containerRect.width;
+        const displayHeight = (displayWidth / dragSigImg.naturalWidth) * dragSigImg.naturalHeight || 60;
+        const topPx = (1 - sigSettings.yPercent) * containerRect.height - displayHeight;
+
+        draggableSig.style.left = `${leftPx}px`;
+        draggableSig.style.top = `${topPx}px`;
+    });
 }
 
 // 拖拽逻辑
@@ -305,7 +392,7 @@ let dragStart = { x: 0, y: 0 };
 let sigStart = { left: 0, top: 0 };
 
 draggableSig.addEventListener('mousedown', startDrag);
-draggableSig.addEventListener('touchstart', startDrag, {passive: false});
+draggableSig.addEventListener('touchstart', startDrag, { passive: false });
 
 function startDrag(e) {
     e.preventDefault();
@@ -323,13 +410,13 @@ function startDrag(e) {
 
     document.addEventListener('mousemove', onDrag);
     document.addEventListener('mouseup', stopDrag);
-    document.addEventListener('touchmove', onDrag, {passive: false});
+    document.addEventListener('touchmove', onDrag, { passive: false });
     document.addEventListener('touchend', stopDrag);
 }
 
 function onDrag(e) {
     if (!isDraggingSig) return;
-    e.preventDefault(); // 防止手机滚动
+    e.preventDefault();
 
     const clientX = e.clientX || e.touches[0].clientX;
     const clientY = e.clientY || e.touches[0].clientY;
@@ -337,7 +424,6 @@ function onDrag(e) {
     const dx = clientX - dragStart.x;
     const dy = clientY - dragStart.y;
 
-    // 限制在容器内
     const containerW = a4Container.offsetWidth;
     const containerH = a4Container.offsetHeight;
     const sigW = draggableSig.offsetWidth;
@@ -346,7 +432,6 @@ function onDrag(e) {
     let newLeft = sigStart.left + dx;
     let newTop = sigStart.top + dy;
 
-    // 边界检查
     newLeft = Math.max(0, Math.min(newLeft, containerW - sigW));
     newTop = Math.max(0, Math.min(newTop, containerH - sigH));
 
@@ -363,7 +448,6 @@ function stopDrag() {
     document.removeEventListener('touchend', stopDrag);
 }
 
-// 缩放滑块逻辑
 dragScaleSlider.addEventListener('input', (e) => {
     const newWidth = parseInt(e.target.value);
     draggableSig.style.width = `${newWidth}px`;
@@ -388,20 +472,136 @@ function updateUI() {
     }
 }
 
+// --- Helper: Apply Signature to PDF Document ---
+async function applySignatureToPdf(pdfDoc) {
+    if (!signatureData) return;
+
+    const sigImageEmbed = await pdfDoc.embedPng(signatureData);
+    const pages = pdfDoc.getPages();
+    const scope = document.getElementById('sig-scope').value;
+
+    const sigImgDims = sigImageEmbed.scale(1);
+    const targetWidth = sigSettings.width;
+    const targetHeight = sigImgDims.height * (targetWidth / sigImgDims.width);
+
+    let targetIndices = [];
+    if (scope === 'all') {
+        targetIndices = pages.map((_, i) => i);
+    } else if (scope === 'first') {
+        targetIndices = [0];
+    } else if (scope === 'last') {
+        targetIndices = [pages.length - 1];
+    }
+
+    targetIndices.forEach(idx => {
+        const page = pages[idx];
+        if (page) {
+            const { width: pageWidth, height: pageHeight } = page.getSize();
+            const rotation = page.getRotation().angle;
+            const sigRotation = PDFLib.degrees(rotation);
+
+            let pdfX, pdfY;
+            if (rotation === 0) {
+                pdfX = pageWidth * sigSettings.xPercent;
+                pdfY = pageHeight * sigSettings.yPercent;
+            } else if (rotation === 90) {
+                pdfX = pageWidth * sigSettings.yPercent;
+                pdfY = pageHeight * (1 - sigSettings.xPercent);
+            } else if (rotation === 180) {
+                pdfX = pageWidth * (1 - sigSettings.xPercent);
+                pdfY = pageHeight * (1 - sigSettings.yPercent);
+            } else if (rotation === 270) {
+                pdfX = pageWidth * (1 - sigSettings.yPercent);
+                pdfY = pageHeight * sigSettings.xPercent;
+            }
+
+            page.drawImage(sigImageEmbed, {
+                x: pdfX,
+                y: pdfY,
+                width: targetWidth,
+                height: targetHeight,
+                rotate: sigRotation
+            });
+        }
+    });
+}
+
 // --- Generate PDF Logic ---
 mergeBtn.addEventListener('click', async () => {
-    if(filesMap.size === 0) return;
+    if (filesMap.size === 0) return;
     setLoading(true);
 
     try {
-        const outputDoc = await PDFDocument.create();
-        const listItems = fileListEl.querySelectorAll('.list-item-wrapper');
-        let sigImageEmbed = null;
+        // Word to PDF Logic
+        if (currentMode === 'word') {
+            const listItems = fileListEl.querySelectorAll('.list-item-wrapper');
+            // We process files one by one for Word
+            for (const item of listItems) {
+                const id = item.getAttribute('data-id');
+                const data = filesMap.get(id);
 
-        if(signatureData) {
-            sigImageEmbed = await outputDoc.embedPng(signatureData);
+                // Convert .docx to HTML using Mammoth
+                const arrayBuffer = await data.file.arrayBuffer();
+                const result = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer });
+                const html = result.value; // The generated HTML
+
+                // Create a temporary container for HTML2PDF
+                const element = document.createElement('div');
+                element.innerHTML = `
+                    <style>
+                        body { 
+                            font-family: 'Microsoft YaHei', 'SimHei', Arial, sans-serif; 
+                            padding: 40px; 
+                            line-height: 1.6; 
+                            color: #000000 !important; /* 强制纯黑 */
+                            -webkit-font-smoothing: antialiased;
+                        }
+                        p { margin-bottom: 12px; text-align: justify; }
+                        h1, h2, h3, h4, h5, h6 { color: #000000 !important; font-weight: bold; margin-top: 20px; margin-bottom: 10px; }
+                        table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+                        td, th { border: 1px solid #333; padding: 8px; }
+                        img { max-width: 100%; height: auto; display: block; margin: 10px 0; }
+                    </style>
+                    ${html}
+                `;
+
+                // Use HTML2PDF to generate PDF Buffer (High Quality)
+                const opt = {
+                    margin: [10, 10, 10, 10],
+                    filename: data.file.name.replace('.docx', '.pdf'),
+                    image: { type: 'jpeg', quality: 1.0 },
+                    html2canvas: {
+                        scale: 4,
+                        useCORS: true,
+                        letterRendering: true,
+                        scrollY: 0
+                    },
+                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                };
+
+                // Get PDF as ArrayBuffer
+                const pdfBuffer = await html2pdf().set(opt).from(element).output('arraybuffer');
+
+                // Load into PDFLib
+                const pdfDoc = await PDFDocument.load(pdfBuffer);
+
+                // Apply Signature
+                await applySignatureToPdf(pdfDoc);
+
+                // Save and Download
+                const pdfBytes = await pdfDoc.save();
+                downloadBlob(pdfBytes, data.file.name.replace('.docx', '.pdf'), 'application/pdf');
+            }
+
+            setLoading(false);
+            return;
         }
 
+        // Merge / Image to PDF Logic
+        const outputDoc = await PDFDocument.create();
+        const listItems = fileListEl.querySelectorAll('.list-item-wrapper');
+
+        // 2. 处理所有文件 (合并/图片转PDF)
         for (const item of listItems) {
             const id = item.getAttribute('data-id');
             const data = filesMap.get(id);
@@ -412,17 +612,19 @@ mergeBtn.addEventListener('click', async () => {
                 const copiedPages = await outputDoc.copyPages(srcPdf, srcPdf.getPageIndices());
                 copiedPages.forEach(page => outputDoc.addPage(page));
             } else {
+                // 图片模式：创建 A4 页面
                 let img;
-                if(data.file.type.includes('png')) img = await outputDoc.embedPng(arrayBuffer);
+                if (data.file.type.includes('png')) img = await outputDoc.embedPng(arrayBuffer);
                 else img = await outputDoc.embedJpg(arrayBuffer);
 
                 const page = outputDoc.addPage([A4_WIDTH, A4_HEIGHT]);
-                // 旧的图片位置逻辑（保留）
+
+                // 图片排版逻辑
                 const { scale, align } = data.settings;
                 const dims = img.scale(1);
-                const maxW = A4_WIDTH - MARGIN*2;
-                const maxH = A4_HEIGHT - MARGIN*2;
-                const baseScale = Math.min(maxW/dims.width, maxH/dims.height);
+                const maxW = A4_WIDTH - MARGIN * 2;
+                const maxH = A4_HEIGHT - MARGIN * 2;
+                const baseScale = Math.min(maxW / dims.width, maxH / dims.height);
                 const finalScale = baseScale * scale;
                 const w = dims.width * finalScale;
                 const h = dims.height * finalScale;
@@ -432,45 +634,14 @@ mergeBtn.addEventListener('click', async () => {
             }
         }
 
-        // 3. 应用签名 (使用新的拖拽坐标)
-        if(sigImageEmbed) {
-            const pages = outputDoc.getPages();
-            const scope = document.getElementById('sig-scope').value;
-
-            // 计算签名在 PDF 上的实际尺寸和位置
-            const sigImgDims = sigImageEmbed.scale(1);
-            const targetWidth = sigSettings.width; // 已转换好的 PDF 点数宽度
-            const targetHeight = sigImgDims.height * (targetWidth / sigImgDims.width);
-
-            const pdfX = A4_WIDTH * sigSettings.xPercent;
-            const pdfY = A4_HEIGHT * sigSettings.yPercent; // 已经是 bottom-up
-
-            let targetIndices = [];
-            if (scope === 'all') {
-                targetIndices = pages.map((_, i) => i);
-            } else if (scope === 'first') {
-                targetIndices = [0];
-            } else if (scope === 'last') {
-                targetIndices = [pages.length - 1];
-            }
-
-            targetIndices.forEach(idx => {
-                if(pages[idx]) {
-                    pages[idx].drawImage(sigImageEmbed, {
-                        x: pdfX,
-                        y: pdfY,
-                        width: targetWidth,
-                        height: targetHeight
-                    });
-                }
-            });
-        }
+        // 3. 应用签名
+        await applySignatureToPdf(outputDoc);
 
         const pdfBytes = await outputDoc.save();
         const fileName = currentMode === 'merge' ? 'merged.pdf' : 'images.pdf';
         downloadBlob(pdfBytes, fileName, 'application/pdf');
 
-    } catch(e) {
+    } catch (e) {
         console.error(e);
         alert("生成失败: " + e.message);
     } finally {
@@ -478,7 +649,6 @@ mergeBtn.addEventListener('click', async () => {
     }
 });
 
-// 旧的九宫格计算（仅给图片转PDF用）
 function calcPos(align, w, h) {
     let x, y;
     if (align.includes('l')) x = MARGIN;
@@ -492,13 +662,191 @@ function calcPos(align, w, h) {
 
 function setLoading(v) {
     mergeBtn.disabled = v;
-    document.getElementById('loader').style.display=v?'block':'none';
+    document.getElementById('loader').style.display = v ? 'block' : 'none';
     if (!v) {
-        document.getElementById('btn-text').innerText = currentMode === 'merge' ? '开始合并 PDF' : '生成 PDF';
+        document.getElementById('btn-text').innerText = currentMode === 'merge' ? '开始合并 PDF' :
+            (currentMode === 'word' ? '开始转换' : '生成 PDF');
     } else {
         document.getElementById('btn-text').innerText = '处理中...';
     }
-    mergeBtn.style.opacity=v?0.7:1;
+    mergeBtn.style.opacity = v ? 0.7 : 1;
 }
 
-function downloadBlob(data, name, type) { const b = new Blob([data],{type}); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href=u; a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>URL.revokeObjectURL(u),100); }
+function downloadBlob(data, name, type) { const b = new Blob([data], { type }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => URL.revokeObjectURL(u), 100); }
+
+
+// --- Image Editor Logic ---
+
+function loadEditorImage(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        editorState.originalUrl = e.target.result;
+        editorState.currentUrl = e.target.result;
+        editorState.hue = 0;
+        editorState.sat = 100;
+
+        editorDropArea.style.display = 'none';
+        editorWorkspace.style.display = 'block';
+
+        editorImage.src = editorState.currentUrl;
+
+        // Reset Controls
+        editHue.value = 0;
+        editSat.value = 100;
+        valHue.innerText = '0';
+        valSat.innerText = '100%';
+
+        // Auto-fill dimensions
+        editorImage.onload = () => {
+            editW.value = editorImage.naturalWidth;
+            editH.value = editorImage.naturalHeight;
+        };
+    };
+    reader.readAsDataURL(file);
+}
+
+// Filter Logic
+function updateFilter() {
+    const hue = editHue.value;
+    const sat = editSat.value;
+    valHue.innerText = hue;
+    valSat.innerText = sat + '%';
+
+    // Apply CSS filter for preview
+    editorImage.style.filter = `hue-rotate(${hue}deg) saturate(${sat}%)`;
+}
+
+editHue.addEventListener('input', updateFilter);
+editSat.addEventListener('input', updateFilter);
+
+// Crop Logic
+btnToggleCrop.addEventListener('click', () => {
+    if (editorState.isCropping) return;
+
+    editorState.isCropping = true;
+    btnToggleCrop.style.display = 'none';
+    cropActions.style.display = 'flex';
+
+    // Disable other controls
+    editHue.disabled = true;
+    editSat.disabled = true;
+
+    // Init Cropper
+    editorState.cropper = new Cropper(editorImage, {
+        viewMode: 1,
+        autoCropArea: 0.8,
+    });
+});
+
+btnConfirmCrop.addEventListener('click', () => {
+    if (!editorState.cropper) return;
+
+    // Get cropped canvas
+    const croppedCanvas = editorState.cropper.getCroppedCanvas();
+    editorState.currentUrl = croppedCanvas.toDataURL('image/png');
+
+    // Destroy cropper
+    editorState.cropper.destroy();
+    editorState.cropper = null;
+
+    // Update Image
+    editorImage.src = editorState.currentUrl;
+
+    exitCropMode();
+
+    // Update dimensions
+    editW.value = croppedCanvas.width;
+    editH.value = croppedCanvas.height;
+});
+
+btnCancelCrop.addEventListener('click', () => {
+    if (editorState.cropper) {
+        editorState.cropper.destroy();
+        editorState.cropper = null;
+    }
+    exitCropMode();
+});
+
+function exitCropMode() {
+    editorState.isCropping = false;
+    btnToggleCrop.style.display = 'block';
+    cropActions.style.display = 'none';
+    editHue.disabled = false;
+    editSat.disabled = false;
+}
+
+// Resize Logic
+lockRatio.addEventListener('change', () => {
+    if (lockRatio.checked && editorImage.naturalWidth) {
+        const ratio = editorImage.naturalWidth / editorImage.naturalHeight;
+        editH.value = Math.round(editW.value / ratio);
+    }
+});
+
+editW.addEventListener('input', () => {
+    if (lockRatio.checked && editorImage.naturalWidth) {
+        const ratio = editorImage.naturalWidth / editorImage.naturalHeight;
+        editH.value = Math.round(editW.value / ratio);
+    }
+});
+
+editH.addEventListener('input', () => {
+    if (lockRatio.checked && editorImage.naturalWidth) {
+        const ratio = editorImage.naturalWidth / editorImage.naturalHeight;
+        editW.value = Math.round(editH.value * ratio);
+    }
+});
+
+btnApplyResize.addEventListener('click', () => {
+    const w = parseInt(editW.value);
+    const h = parseInt(editH.value);
+    if (!w || !h) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+
+    // Draw current image scaled
+    ctx.drawImage(editorImage, 0, 0, w, h);
+
+    editorState.currentUrl = canvas.toDataURL('image/png');
+    editorImage.src = editorState.currentUrl;
+});
+
+// Reset
+btnResetEdit.addEventListener('click', () => {
+    if (confirm('确定要重置所有编辑吗？')) {
+        editorImage.src = editorState.originalUrl;
+        editorState.currentUrl = editorState.originalUrl;
+        editHue.value = 0;
+        editSat.value = 100;
+        updateFilter();
+
+        // Reset dimensions
+        const img = new Image();
+        img.onload = () => {
+            editW.value = img.width;
+            editH.value = img.height;
+        };
+        img.src = editorState.originalUrl;
+    }
+});
+
+// Download
+btnDownloadEdit.addEventListener('click', () => {
+    // We need to apply the CSS filters (Hue/Sat) to the final canvas if they are active
+    const canvas = document.createElement('canvas');
+    canvas.width = editorImage.naturalWidth;
+    canvas.height = editorImage.naturalHeight;
+    const ctx = canvas.getContext('2d');
+
+    // Apply filters
+    ctx.filter = `hue-rotate(${editHue.value}deg) saturate(${editSat.value}%)`;
+    ctx.drawImage(editorImage, 0, 0);
+
+    const link = document.createElement('a');
+    link.download = 'edited-image.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+});
