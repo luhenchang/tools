@@ -1,0 +1,155 @@
+/* --- Image Editor Styles --- */
+.editor-layout {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+}
+
+.editor-canvas-box {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+    min-height: 400px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.editor-sidebar {
+    width: 280px;
+    background: var(--card-bg);
+    border-radius: 8px;
+    padding: 15px;
+    border: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.tool-group {
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 15px;
+}
+
+.tool-group:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.tool-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    font-size: 0.85rem;
+    color: var(--text-sub);
+}
+
+.slider-row span {
+    width: 40px;
+}
+
+.slider-row .val {
+    width: 35px;
+    text-align: right;
+    color: var(--text-main);
+}
+
+.resize-inputs {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 8px;
+}
+
+.resize-inputs input {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    padding: 6px;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--text-sub);
+}
+
+.btn-tool {
+    width: 100%;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: 0.2s;
+    font-size: 0.9rem;
+}
+
+.btn-tool:hover {
+    border-color: var(--accent);
+}
+
+.btn-tool.primary {
+    background: var(--accent);
+    color: #000;
+    font-weight: 600;
+    border: none;
+}
+
+.btn-tool.danger {
+    color: var(--danger);
+    border-color: var(--danger);
+}
+
+.btn-tool.danger:hover {
+    background: rgba(255, 77, 79, 0.1);
+}
+
+.btn-tool.confirm {
+    background: #4caf50;
+    color: white;
+    border: none;
+}
+
+.btn-tool.cancel {
+    background: #f44336;
+    color: white;
+    border: none;
+}
+
+.editor-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: auto;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .editor-layout {
+        flex-direction: column;
+    }
+
+    .editor-sidebar {
+        width: 100%;
+    }
+}
