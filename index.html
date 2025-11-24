@@ -18,6 +18,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
+    <!-- PDF to Word Libs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://unpkg.com/docx@7.1.0/build/index.js"></script>
+
     <!-- CSS Modules -->
     <link rel="stylesheet" href="css/variables.css">
     <link rel="stylesheet" href="css/base.css">
@@ -48,6 +52,9 @@
             </button>
             <button class="tab-btn" id="tab-editor" onclick="switchMode('editor')">
                 <i class="fas fa-edit"></i> 图片编辑
+            </button>
+            <button class="tab-btn" id="tab-pdf-word" onclick="switchMode('pdf-word')">
+                <i class="fas fa-file-word"></i> PDF 转 Word
             </button>
         </div>
 
@@ -228,6 +235,7 @@
     <script src="js/file-manager.js"></script>
     <script src="js/signature.js"></script>
     <script src="js/editor.js"></script>
+    <script src="js/pdf-to-word.js"></script>
     <script src="js/converter.js"></script>
     <script src="js/main.js"></script>
 </body>

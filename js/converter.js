@@ -18,6 +18,21 @@ mergeBtn.addEventListener('click', async () => {
     setLoading(true);
 
     try {
+        // PDF to Word Logic
+        if (currentMode === 'pdf-word') {
+            const listItems = fileListEl.querySelectorAll('.list-item-wrapper');
+            for (const item of listItems) {
+                const id = item.getAttribute('data-id');
+                const data = filesMap.get(id);
+                const scope = document.getElementById('sig-scope').value;
+
+                const wordBlob = await convertPdfToWord(data.file, signatureData, sigSettings, scope);
+                downloadBlob(wordBlob, data.file.name.replace('.pdf', '.docx'), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+            }
+            setLoading(false);
+            return;
+        }
+
         // Word to PDF Logic
         if (currentMode === 'word') {
             const listItems = fileListEl.querySelectorAll('.list-item-wrapper');

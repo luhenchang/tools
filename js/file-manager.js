@@ -17,14 +17,14 @@ async function handleFiles(files) {
         if (currentMode === 'merge') return file.type === 'application/pdf';
         if (currentMode === 'image') return ['image/jpeg', 'image/png'].includes(file.type);
         if (currentMode === 'word') return file.name.endsWith('.docx');
-        if (currentMode === 'pdf2word') return file.type === 'application/pdf';
+        if (currentMode === 'pdf-word') return file.type === 'application/pdf';
         return false;
     });
 
     if (validFiles.length === 0) return;
 
     // Capture PDF Metadata for the first PDF (for Preview Sizing)
-    if ((currentMode === 'merge' || currentMode === 'pdf2word') && !activePdfMetadata) {
+    if ((currentMode === 'merge' || currentMode === 'pdf-word') && !activePdfMetadata) {
         try {
             const arrayBuffer = await validFiles[0].arrayBuffer();
             const pdfDoc = await PDFDocument.load(arrayBuffer);

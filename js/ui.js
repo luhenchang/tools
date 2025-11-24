@@ -23,6 +23,7 @@ function switchMode(mode) {
     else if (mode === 'image') document.getElementById('tab-image').classList.add('active');
     else if (mode === 'word') document.getElementById('tab-word').classList.add('active');
     else if (mode === 'editor') document.getElementById('tab-editor').classList.add('active');
+    else if (mode === 'pdf-word') document.getElementById('tab-pdf-word').classList.add('active');
 
     // Toggle Sections
     if (mode === 'editor') {
@@ -47,6 +48,10 @@ function switchMode(mode) {
         } else if (mode === 'word') {
             dropText.innerHTML = '点击或拖拽添加 <b>Word 文件 (.docx)</b> 转 PDF';
             fileInput.accept = '.docx';
+            document.getElementById('btn-text').innerText = '开始转换';
+        } else if (mode === 'pdf-word') {
+            dropText.innerHTML = '点击或拖拽添加 <b>PDF 文件</b> 转 Word';
+            fileInput.accept = 'application/pdf';
             document.getElementById('btn-text').innerText = '开始转换';
         }
     }
